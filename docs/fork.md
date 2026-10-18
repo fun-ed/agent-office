@@ -47,6 +47,7 @@ git log --oneline --no-merges origin/main..fork/main
 |---|---|---|
 | 讓 Firefox 上的 3D 畫面更輕：準心射線只測到最遠互動距離 | `src/client/input/pointer.ts` | 和 upstream PR #375 的內容相同 |
 | 省電模式（⚙️ → *Graphics* → **🔋 Power saver**），Firefox 預設開啟：限 30 fps、pixel ratio 1、不畫描邊、陰影貼圖 1024 且隔幀重畫、關閉 MSAA、比照 reduced motion | `src/client/core/loop.ts`、`src/client/core/scene.ts`、`src/client/state/persist.ts`、`src/client/ui/settings.ts`、`src/client/main.ts` | 取代 #375 原本 Firefox 專用的陰影隔幀和 1.5 倍 pixel ratio |
+| ACP agent：Oh My Pi、Codex (ACP)、OpenCode (ACP)、Devin，透過 `mise exec --` 啟動各自原生的 ACP server，沿用 DeepSeek Harness 的 ACP 連線；model 與 effort 依 ACP `configOptions` 的 category 找選項，Devin 用 `session/load` 續接 | `src/server/providers/acp.ts`、`src/server/acp-config.ts`、`src/server/dsh.ts`、`src/server/workers/acp.ts`、`src/shared/providers.ts`、`src/client/ui/usage.ts` | 只在 fork；DeepSeek Harness 的行為不變 |
 | Fork 維護文件 | `docs/fork.md`、`.claude/skills/fork-sync/SKILL.md`、`CLAUDE.md`、`README.md` | 只屬於 fork |
 
 新增或移除自家改動時，同時更新這張表。

@@ -104,7 +104,15 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   }
 
   if (msg.method === 'initialize') {
-    return out({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: 1, agentCapabilities: { sessionCapabilities: { list: {}, resume: {}, close: {} } }, authMethods: [], agentInfo: { name: 'fake-dsh', version: '0' } } });
+    // DSH_FAKE_LOAD_ONLY: an agent that carries a session on only by replaying it (Devin's ACP server).
+    const caps = process.env.DSH_FAKE_LOAD_ONLY === '1' ? { loadSession: true, sessionCapabilities: { list: {}, close: {} } } : { sessionCapabilities: { list: {}, resume: {}, close: {} } };
+    return out({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: 1, agentCapabilities: caps, authMethods: [], agentInfo: { name: 'fake-dsh', version: '0' } } });
+  }
+  if (msg.method === 'session/load') {
+    if (!readSessions().includes(msg.params.sessionId)) return out({ jsonrpc: '2.0', id: msg.id, error: { code: -32602, message: 'unknown session' } });
+    if (log) append(log, JSON.stringify({ loaded: msg.params.sessionId }) + '\n');
+    out({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: msg.params.sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'REPLAYED HISTORY\n' } } } });
+    return out({ jsonrpc: '2.0', id: msg.id, result: { configOptions: configOptions() } });
   }
   if (msg.method === 'session/new') {
     const id = 'sess-' + (readSessions().length + 1);
@@ -708,6 +716,22 @@ test('a restart resumes the session the agent remembers, and falls back when it 
   await waitFor(() => third.state.statuses, (s) => s.includes('idle'));
   assert.equal(third.state.sessions.length, 1);
   assert.notEqual(third.state.sessions[0], 'sess-1');
+});
+
+test('an agent without session/resume is carried on with session/load, its replay not drawn again', async (t) => {
+  const f = tracked(t);
+  const env = { DSH_FAKE_LOAD_ONLY: '1' };
+  const first = startSession(f, { label: 'Devin' }, env);
+  await waitFor(() => first.state.output, (o) => o.includes('Devin ready'));
+  first.session.close();
+  await waitFor(() => first.state.exits, (e) => e.length > 0);
+
+  const second = startSession(f, { label: 'Devin', resumeSessionId: 'sess-1' }, env);
+  t.after(() => second.session.close());
+  await waitFor(() => second.state.output, (o) => o.includes('resumed session sess-1'));
+  assert.deepEqual(second.state.sessions, ['sess-1']);
+  assert.ok(readFileSync(f.log, 'utf8').includes('"loaded":"sess-1"'));
+  assert.ok(!second.state.output.includes('REPLAYED'), 'the terminal already shows the conversation');
 });
 
 test('a fresh hire starts its own session, never the newest one another desk left in the checkout', async (t) => {

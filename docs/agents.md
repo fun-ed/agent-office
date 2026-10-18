@@ -2,7 +2,7 @@
 
 Back to the [README](../README.md).
 
-Every new worker starts on the office's **Default worker**: a provider, model and effort an admin picks in ⚙️ Settings → **🤖 Workers** (the `--agent` with its own default model until someone does). The hire, ask, queue, issue and meeting windows show it on one line; click **✏️ Edit** there to pick **Claude Code**, **OpenCode**, **Codex**, **Grok**, **Muse**, **DeepSeek Harness**, **Pi** or **Cursor**, a model and an effort for just that worker or task, and **↺ Use the default** to go back. Board agents and tasks the Queue agent adds, which nobody picks for, start on the default too. Existing workers keep their provider when prompted or resumed, and queued tasks keep their choice when retried or restored after a restart.
+Every new worker starts on the office's **Default worker**: a provider, model and effort an admin picks in ⚙️ Settings → **🤖 Workers** (the `--agent` with its own default model until someone does). The hire, ask, queue, issue and meeting windows show it on one line; click **✏️ Edit** there to pick **Claude Code**, **OpenCode**, **Codex**, **Grok**, **Muse**, **DeepSeek Harness**, **Pi**, **Cursor**, or one of the ACP agents (**Oh My Pi**, **Codex (ACP)**, **OpenCode (ACP)**, **Devin**), a model and an effort for just that worker or task, and **↺ Use the default** to go back. Board agents and tasks the Queue agent adds, which nobody picks for, start on the default too. Existing workers keep their provider when prompted or resumed, and queued tasks keep their choice when retried or restored after a restart.
 
 Every harness takes both a **Model** and an **Effort**, each optional: leave one on **Default** and the harness uses its own settings.
 
@@ -15,6 +15,7 @@ Every harness takes both a **Model** and an **Effort**, each optional: leave one
 | Muse | a model id, typed (`--model`) | `--reasoning-effort` |
 | DeepSeek Harness | a model id from its catalog, typed | its `reasoning_effort` option |
 | Pi | a model name or `provider/model`, typed (`--model`) | **Thinking** (`--thinking`) |
+| Oh My Pi, Codex (ACP), OpenCode (ACP), Devin | a model id from the catalog its ACP session advertises, typed | its ACP `thought_level` option, at the nearest level it offers |
 
 The efforts are low, medium, high, extra high and max. Where a harness's own catalog says which of them a model supports (Codex and OpenCode do), the ones it doesn't are greyed out once that model is picked. A harness whose models can't be listed (its CLI isn't installed, or isn't signed in) still takes a model id typed in. A **Custom** `--agent` is run as it is, so it has neither field: set its model and effort in `--agent-args`.
 
@@ -71,6 +72,25 @@ Codex uses its interactive CLI with `--no-alt-screen`, preserves native sandbox 
 OpenCode metrics come from assistant-message token/cost records exposed by its plugin SDK. Updated messages replace prior values so streaming updates do not add the same call twice; existing root and child sessions are loaded on resume. History that is still loading or unavailable is labeled as partial. These snapshots update usage only, so a report cannot dismiss a permission request. The daily budget and historical ledger remain Claude-only.
 
 DeepSeek Harness metrics come from ACP `usage_update`: tokens in context and the window's size, shown per worker and for the current desks, plus a session cost only when the harness reports one. The daily budget and historical ledger remain Claude-only.
+
+### ACP agents: Oh My Pi, Codex (ACP), OpenCode (ACP) and Devin
+
+These four run the way DeepSeek Harness does: the office starts the agent's own ACP server and drives it over newline-delimited JSON-RPC on stdio, and the laptop shows the transcript the office draws from it (thoughts, tool calls, approvals, the turn's ending), with the same keys: type a line and **Enter** to send it, **Esc** to cancel the turn or reject an approval, **Enter** on an empty line to allow once.
+
+| Pick | ACP server it starts | Install and sign in |
+| --- | --- | --- |
+| **Oh My Pi** | `omp acp` | `omp`, signed in to the providers its models use |
+| **Codex (ACP)** | `codex-acp` | `npm install -g @agentclientprotocol/codex-acp`, with Codex signed in (`codex login`) |
+| **OpenCode (ACP)** | `opencode acp` | OpenCode 2 (`opencode`), with its providers signed in (`opencode auth login`) |
+| **Devin** | `devin acp` | the Devin CLI, signed in (`devin auth login`) |
+
+Each is started through `mise exec --` in the worker's folder, so mise supplies the CLI and the runtime it needs (a global npm package such as `codex-acp` included). On a machine without `mise` on the office's `PATH`, the command runs on its own. Because mise runs in the worker's folder, a project with a `mise.toml` mise hasn't been told to trust stops the agent from starting until you run `mise trust` there.
+
+**Codex (ACP)** and **OpenCode (ACP)** sit beside the terminal **Codex** and **OpenCode**, which keep their hooks, plugin and usage tracking: pick the terminal one for those, and the ACP one for the office's transcript and approvals. `--agent omp`, `--agent codex-acp` and `--agent devin` make one of them the default, and `--agent-args` go on its server's command line (ahead of `acp` for omp, after it for the others). `--agent opencode` is still the terminal OpenCode.
+
+The **Model** field takes an id from the agent's own catalog, typed: `openai-codex/gpt-6.1-sol` for Oh My Pi, `gpt-6-sol` for Codex, `provider/model` for OpenCode, `swe-2-high` for Devin. The office applies it with `session/set_config_option` on the session's `model` option, matching the id or the option's name, and leaves the agent's default in place when the catalog has no such model. **Effort** goes to the option the agent files under ACP's `thought_level` category (`thinking` for Oh My Pi, `reasoning_effort` for Codex, `effort` for OpenCode, `thought_level` for Devin), at the nearest level the agent offers, rounding up on a tie: Devin has medium, high and max, so **Low** lands on medium. A model that can't be used (a provider that isn't signed in) shows up as the turn's error in the transcript.
+
+**R** carries the worker's own session on: with `session/resume` where the agent has it (Oh My Pi, Codex, OpenCode), and `session/load` where it only replays (Devin), without drawing the replayed conversation a second time. Usage is what each reports with `usage_update`: what's in the context window and its size, and a cost only where the agent reports one (Oh My Pi does). The office doesn't hand them its own MCP server (`office-workers`), and the daily budget stays Claude-only.
 
 ## The office's prompts
 

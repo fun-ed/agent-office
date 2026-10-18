@@ -4,7 +4,7 @@
 //
 // Browser-safe: no node imports, the hire dialog reads this too.
 
-export const AGENT_PROVIDERS = ['claude', 'opencode', 'codex', 'grok', 'muse', 'dsh', 'pi', 'cursor', 'custom'] as const;
+export const AGENT_PROVIDERS = ['claude', 'opencode', 'codex', 'grok', 'muse', 'dsh', 'pi', 'cursor', 'omp', 'codex-acp', 'opencode-acp', 'devin', 'custom'] as const;
 
 export type AgentProvider = (typeof AGENT_PROVIDERS)[number];
 
@@ -122,6 +122,13 @@ export function isValidDshModel(value: unknown): value is string {
   return !/[\p{Cc}\p{Cf}]/u.test(value);
 }
 
+/**
+ * A model for a worker that runs over ACP (Oh My Pi, Codex ACP, OpenCode ACP, Devin): a value from
+ * the catalog its session advertises, applied with `session/set_config_option` and never put on a
+ * command line, so it is checked like DSH's.
+ */
+export const isValidAcpModel = isValidDshModel;
+
 /** One model a provider offers, for the hire dialog: a fixed one, or one its own CLI lists (see server/models.ts). */
 export interface ModelOption {
   id: string;
@@ -174,6 +181,8 @@ export interface ProviderMeta {
     tracked?: boolean;
     /** It reports numbers of its own: until the first report comes in, it's waiting for one rather than untracked. */
     reports?: boolean;
+    /** Its numbers are what's in its context window, from ACP `usage_update`, not a token split. */
+    context?: boolean;
     /** Its reports leave the cost out unless they say it's known. */
     noCost?: boolean;
     /** What it says while it waits for its first numbers. */
@@ -285,7 +294,7 @@ export const PROVIDER_META: Record<AgentProvider, ProviderMeta> = {
       invalid: 'Use a DeepSeek Harness catalog model id of up to 256 characters without control characters.',
     },
     takesEffort: true,
-    usage: { reports: true, waiting: 'waiting for first report', note: 'DeepSeek Harness reports context usage over ACP after its first turn; cost may be unavailable.' },
+    usage: { reports: true, context: true, waiting: 'waiting for first report', note: 'DeepSeek Harness reports context usage over ACP after its first turn; cost may be unavailable.' },
   },
   pi: {
     label: 'Pi',
@@ -320,6 +329,10 @@ export const PROVIDER_META: Record<AgentProvider, ProviderMeta> = {
     },
     usage: { note: 'Cursor uses the Cursor CLI login on the office machine. Usage and cost stay in its terminal and your Cursor account; the office does not meter them.' },
   },
+  omp: acpMeta('Oh My Pi', 'omp', 'openai-codex/gpt-6.1-sol', 'its default model'),
+  'codex-acp': acpMeta('Codex (ACP)', 'codex-acp', 'gpt-6-sol', 'Codex settings'),
+  'opencode-acp': acpMeta('OpenCode (ACP)', 'opencode', 'anthropic/claude-opus-5-5', 'OpenCode settings'),
+  devin: acpMeta('Devin', 'devin', 'swe-2-high', 'Devin settings'),
   custom: {
     label: 'Custom',
     name: 'Custom',
@@ -327,6 +340,30 @@ export const PROVIDER_META: Record<AgentProvider, ProviderMeta> = {
     usage: { note: 'Usage is untracked unless compatible Claude Code hooks report it.' },
   },
 };
+
+/**
+ * An agent the office drives through its own ACP server (see server/providers/acp.ts): the model is
+ * typed, matched against the catalog the session advertises, and the effort lands on the nearest
+ * level the agent offers.
+ */
+function acpMeta(label: string, bin: string, example: string, defaults: string): ProviderMeta {
+  return {
+    label,
+    name: label,
+    bin,
+    validModel: isValidAcpModel,
+    invalidModel: `Invalid ${label} model (expected a model id of up to ${DSH_MODEL_MAX} characters, without control characters)`,
+    models: {
+      pick: 'typed',
+      unset: `Default (${defaults})`,
+      max: DSH_MODEL_MAX,
+      hint: `Optional model id from its ACP catalog (for example ${example}), and effort; leave empty for ${defaults}.`,
+      invalid: `Use a model id of up to ${DSH_MODEL_MAX} characters without control characters.`,
+    },
+    takesEffort: true,
+    usage: { reports: true, context: true, waiting: 'waiting for first report', note: `${label} runs over ACP and reports context usage after its first turn; cost may be unavailable.` },
+  };
+}
 
 /** What the table says about `provider`, when it's one (saved state and the wire can hold anything). */
 export function providerMeta(provider: unknown): ProviderMeta | undefined {

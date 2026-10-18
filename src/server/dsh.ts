@@ -13,6 +13,9 @@ import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { commandAction, toolAction } from '../shared/actions.js';
 import type { AgentEffort, Usage, WorkerAction, WorkerStatus } from '../shared/protocol.js';
+import { findConfigOption, nearestEffort, resolveConfigValue } from './acp-config.js';
+
+export { configOptionValues, dshEffort, resolveConfigValue } from './acp-config.js';
 
 export const DSH_PROFILE_DEFAULT = 'acp';
 /** Where a floor keeps the sessions the office lists and resumes (under its .agent-office dir). */
@@ -281,6 +284,8 @@ export class DshRenderer {
   /** Tool calls by id, so an update that carries only the id still knows what the tool was. */
   private tools = new Map<string, ToolRow>();
   private toolCalls = 0;
+  /** Each configuration option's value as last shown: an agent resends them all (Devin, on every turn), and only a change is news. */
+  private settings = new Map<string, string>();
 
   /** What tool call `id` said it would act on, for the approval card. */
   toolDetail(id: string | undefined): string | undefined {
@@ -356,7 +361,9 @@ export class DshRenderer {
         if (!isRec(option)) continue;
         const id = str(option.id);
         const value = str(option.currentValue) ?? (typeof option.currentValue === 'boolean' ? String(option.currentValue) : undefined);
-        if (id && value) out.push(`  ${V.muted}${escapeText(id)} ${V.faint}→${V.reset} ${V.muted}${escapeText(oneLine(value, 120))}${V.reset}\r\n`);
+        if (!id || !value || this.settings.get(id) === value) continue;
+        this.settings.set(id, value);
+        out.push(`  ${V.muted}${escapeText(id)} ${V.faint}→${V.reset} ${V.muted}${escapeText(oneLine(value, 120))}${V.reset}\r\n`);
       }
       return { text: out.join('') };
     }
@@ -602,62 +609,6 @@ function inline(raw: string, base: string): string {
   return text.replace(/\u0001(\d+)\u0001/g, (_all, index: string) => painted[Number(index)] ?? '');
 }
 
-/** The choices a select configuration option advertises, flattened across its groups. */
-export function configOptionValues(option: unknown): { value: string; name?: string }[] {
-  if (!isRec(option) || !Array.isArray(option.options)) return [];
-  const values: { value: string; name?: string }[] = [];
-  const add = (entry: unknown): void => {
-    if (!isRec(entry)) return;
-    const value = str(entry.value);
-    if (value) values.push({ value, name: str(entry.name) });
-  };
-  for (const entry of option.options) {
-    // Model options arrive grouped by provider: [{group, name, options: [...]}].
-    if (isRec(entry) && Array.isArray(entry.options)) for (const inner of entry.options) add(inner);
-    else add(entry);
-  }
-  return values;
-}
-
-/** The model inside an advertised route value, which DSH serializes as a JSON [provider, model] pair. */
-function routeModel(value: string): string | undefined {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (Array.isArray(parsed) && typeof parsed[parsed.length - 1] === 'string') return String(parsed[parsed.length - 1]);
-  } catch {
-    // Not a route tuple: the value is already the id itself.
-  }
-  return undefined;
-}
-
-/**
- * Match what someone typed against the live catalog. DSH model values are opaque route tuples
- * (`["deepseek-official","deepseek-v4-pro"]`), so a person is far more likely to type the model
- * name: accept the exact value, the option's label, or the model inside the tuple. Anything that
- * matches nothing is passed through unchanged and the harness has the final say.
- */
-export function resolveConfigValue(input: string, option: unknown): string {
-  const wanted = input.trim();
-  const values = configOptionValues(option);
-  if (!values.length) return wanted;
-  const exact = values.find((entry) => entry.value === wanted);
-  if (exact) return exact.value;
-  const byLabel = values.find((entry) => entry.name?.toLowerCase() === wanted.toLowerCase());
-  if (byLabel) return byLabel.value;
-  const byModel = values.find((entry) => (routeModel(entry.value) ?? '').toLowerCase() === wanted.toLowerCase());
-  return byModel ? byModel.value : wanted;
-}
-
-/**
- * The office's effort levels on DSH's ladder (`off`, `low`, `high`, `max`). The office offers one
- * shared set for Claude and DSH, so the middle levels land on the nearest rung DSH has.
- */
-export function dshEffort(effort: AgentEffort): string {
-  if (effort === 'low') return 'low';
-  if (effort === 'xhigh' || effort === 'max') return 'max';
-  return 'high'; // medium and high: DSH's default balance
-}
-
 // ---------------------------------------------------------------------------
 // Launch configuration
 // ---------------------------------------------------------------------------
@@ -698,6 +649,8 @@ export function writeDshPatch(dataDir: string): string {
 }
 
 export interface DshLaunch {
+  /** What its messages call it ("Devin"): DeepSeek Harness unless said. */
+  label?: string;
   /** The executable to run: the configured `dsh`, or one a test points at a fake agent. */
   file: string;
   args: string[];
@@ -727,9 +680,9 @@ export interface DshEvents {
 }
 
 /**
- * One DSH worker's ACP connection. Serializes prompts (ACP allows one per session), answers
- * permission requests from the person at the terminal, and renders every update into the worker's
- * headless terminal through `events.output`.
+ * One ACP worker's connection: DeepSeek Harness, or another agent's ACP server (see providers/acp.ts).
+ * Serializes prompts (ACP allows one per session), answers permission requests from the person at
+ * the terminal, and renders every update into the worker's headless terminal through `events.output`.
  */
 export class DshSession {
   private child?: ChildProcessWithoutNullStreams;
@@ -742,6 +695,10 @@ export class DshSession {
   private configOptions: Rec[] = [];
   private renderer = new DshRenderer();
   private prompting = false;
+  /** The agent carries a session on only by replaying it (session/load, as Devin does), not session/resume. */
+  private loadOnly = false;
+  /** A session/load is replaying the conversation: the terminal already shows it, so it isn't drawn again. */
+  private replaying = false;
   private finished = false;
   private closing = false;
   private started = false;
@@ -753,6 +710,10 @@ export class DshSession {
 
   get id(): string | undefined {
     return this.sessionId;
+  }
+
+  private get label(): string {
+    return this.launch.label ?? 'DeepSeek Harness';
   }
 
   get running(): boolean {
@@ -888,13 +849,15 @@ export class DshSession {
 
   private async handshake(): Promise<void> {
     try {
-      await this.request('initialize', {
+      const init = await this.request('initialize', {
         protocolVersion: 1,
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } },
         clientInfo: { name: 'agent-office', version: '0.1.0' },
       });
+      const caps = isRec(init) && isRec(init.agentCapabilities) ? init.agentCapabilities : {};
+      this.loadOnly = caps.loadSession === true && !(isRec(caps.sessionCapabilities) && isRec(caps.sessionCapabilities.resume));
     } catch (err) {
-      this.fail(`DeepSeek Harness did not answer initialize: ${reason(err)}`);
+      this.fail(`${this.label} did not answer initialize: ${reason(err)}`);
       return;
     }
 
@@ -915,23 +878,27 @@ export class DshSession {
       const id = isRec(result) ? str(result.sessionId) : undefined;
       if (!id) throw new Error('session/new returned no session id');
       this.adopt(id, isRec(result) ? result.configOptions : undefined);
-      this.events.output(notice('info', 'DeepSeek Harness ready'));
+      this.events.output(notice('info', `${this.label} ready`));
       return true;
     } catch (err) {
-      this.fail(`DeepSeek Harness could not start a session: ${reason(err)}`);
+      this.fail(`${this.label} could not start a session: ${reason(err)}`);
       return false;
     }
   }
 
   private async tryResume(id: string): Promise<boolean> {
+    // session/resume where the agent has it, else session/load (as acpx does), replayed quietly.
+    this.replaying = this.loadOnly;
     try {
-      const result = await this.request('session/resume', { sessionId: id, cwd: this.launch.cwd, mcpServers: [] });
+      const result = await this.request(this.loadOnly ? 'session/load' : 'session/resume', { sessionId: id, cwd: this.launch.cwd, mcpServers: [] });
       this.adopt(id, isRec(result) ? result.configOptions : undefined);
       this.events.output(notice('info', `resumed session ${id}`));
       return true;
     } catch (err) {
       this.events.output(notice('quiet', `could not resume session ${id}: ${oneLine(reason(err), 200)}`));
       return false;
+    } finally {
+      this.replaying = false;
     }
   }
 
@@ -941,19 +908,20 @@ export class DshSession {
     this.events.session(id);
   }
 
-  /** Model and reasoning effort chosen for this worker, if the live catalog offers them. */
+  /** Model and reasoning effort chosen for this worker, if the live catalog offers them (found by ACP category, or DSH's ids). */
   private async applyChoices(): Promise<void> {
-    if (this.launch.model) await this.setConfig('model', this.launch.model);
-    if (this.launch.effort) await this.setConfig('reasoning_effort', dshEffort(this.launch.effort));
+    if (this.launch.model) await this.setConfig('model', 'model', this.launch.model);
+    if (this.launch.effort) await this.setConfig('thought_level', 'reasoning_effort', this.launch.effort);
   }
 
-  private async setConfig(configId: string, wanted: string): Promise<void> {
-    const option = this.configOptions.find((entry) => str(entry.id) === configId);
-    if (!option) {
-      this.events.output(notice('quiet', `the harness advertises no ${configId}; keeping the profile default`));
+  private async setConfig(category: string, id: string, wanted: string): Promise<void> {
+    const option = findConfigOption(this.configOptions, category, id);
+    const configId = str(option?.id);
+    if (!option || !configId) {
+      this.events.output(notice('quiet', `the harness advertises no ${id}; keeping the profile default`));
       return;
     }
-    const value = resolveConfigValue(wanted, option);
+    const value = category === 'thought_level' ? nearestEffort(wanted as AgentEffort, option) : resolveConfigValue(wanted, option);
     try {
       const result = await this.request('session/set_config_option', { sessionId: this.sessionId, configId, value });
       const options = isRec(result) ? result.configOptions : undefined;
@@ -1041,6 +1009,7 @@ export class DshSession {
   }
 
   private onUpdate(params: unknown): void {
+    if (this.replaying) return;
     const update = isRec(params) ? params.update : undefined;
     const rendered = this.renderer.render(update);
     if (rendered.text) this.events.output(rendered.text);
@@ -1104,7 +1073,7 @@ export class DshSession {
   }
 
   private request(method: string, params: unknown, timeoutMs = CONTROL_TIMEOUT_MS): Promise<unknown> {
-    if (!this.child || this.finished) return Promise.reject(new Error('the DeepSeek Harness process is not running'));
+    if (!this.child || this.finished) return Promise.reject(new Error(`the ${this.label} process is not running`));
     const id = ++this.nextId;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
@@ -1140,7 +1109,7 @@ export class DshSession {
     if (this.finished) return;
     this.finished = true;
     const quiet = this.closing;
-    for (const waiter of this.pending.values()) waiter.reject(new Error('the DeepSeek Harness process ended'));
+    for (const waiter of this.pending.values()) waiter.reject(new Error(`the ${this.label} process ended`));
     this.pending.clear();
     this.child = undefined;
     this.events.exit(code, error, quiet);
