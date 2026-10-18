@@ -418,6 +418,10 @@ Every change to the app that lands on `main` is published as a GitHub release by
 - [How it works](docs/how-it-works.md): the architecture, and security notes
 - [Code layout](docs/code-layout.md): where the code lives, adding a feature or an agent provider, and the size guard
 
+## This fork
+
+This is `fun-ed/agent-office`, a fork of [AgentSystemLabs/agent-office](https://github.com/AgentSystemLabs/agent-office). Its `main` is upstream's `main` plus the fork's own patches, among them the 🔋 power saver. [Maintaining the fork](docs/fork.md) lists the patches and covers syncing with upstream, checking and pushing.
+
 ## License
 
 [MIT](LICENSE)
