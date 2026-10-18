@@ -4,7 +4,7 @@
  */
 import * as THREE from 'three';
 import { OutlineEffect } from 'three/examples/jsm/effects/OutlineEffect.js';
-import { store } from '../state';
+import { loadSettings, store } from '../state';
 import { Holiday } from '../world/holiday';
 import { buildOffice } from '../world/office';
 import type { Office } from '../world/types';
@@ -16,15 +16,6 @@ import { noOutline } from './outline';
 export const FAR = HAZE_MAX + 20;
 /** How wide the camera sees (degrees), unless what you're doing has it otherwise (see ctx.view). */
 export const FOV = 55;
-
-/**
- * Firefox's WebGL pays a lot of main-thread time per draw call, and the sun's shadow is hundreds of
- * them each time it's drawn, so there it's redrawn every other frame. A Retina screen there is drawn
- * at 1.5 pixels to a CSS pixel, not 2: a touch softer, with half as many pixels to fill and hold.
- */
-const FIREFOX = navigator.userAgent.includes('Firefox/');
-export const SHADOW_EVERY = FIREFOX ? 2 : 1;
-const MAX_PIXEL_RATIO = FIREFOX ? 1.5 : 2;
 
 /** The renderer, the scene with its lights and camera, and what's always in it (see createScene). */
 export interface Stage {
@@ -46,7 +37,8 @@ export interface Stage {
 
 export function makeRenderer(canvas: HTMLCanvasElement): THREE.WebGLRenderer | null {
   try {
-    return new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    // Power saver goes without multisampling, which only a new renderer can change: from the next page load.
+    return new THREE.WebGLRenderer({ canvas, antialias: !loadSettings().lowPower, powerPreference: 'high-performance' });
   } catch (err) {
     console.error(err);
     return null;
@@ -61,9 +53,8 @@ export function noWebGL(): Promise<never> {
 
 /** Sets up the renderer on `canvas`, and builds the scene: its lights, the camera, the office, the sky. */
 export function createScene(canvas: HTMLCanvasElement, renderer: THREE.WebGLRenderer): Stage {
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
   renderer.shadowMap.enabled = true;
-  // Redrawn every SHADOW_EVERY frames, by drawScene (core/loop.ts).
+  // Redrawn when drawScene says (core/loop.ts), and the pixel ratio set there too, by fitPower.
   renderer.shadowMap.autoUpdate = false;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -99,6 +90,21 @@ export function createScene(canvas: HTMLCanvasElement, renderer: THREE.WebGLRend
   noOutline(office.group);
   noOutline(holiday.group);
   return { canvas, renderer, effect, scene, camera, hemi, ambient, sun, office, sky, holiday };
+}
+
+/**
+ * Power saver or not (see Settings.lowPower): the screen at one pixel to a CSS pixel and the sun's
+ * shadow map at half the size, or up to two pixels and the full map. Only changes what's changed.
+ */
+export function fitPower({ renderer, sun }: Stage, low: boolean) {
+  const ratio = low ? 1 : Math.min(window.devicePixelRatio, 2);
+  if (renderer.getPixelRatio() !== ratio) renderer.setPixelRatio(ratio);
+  const size = low ? 1024 : 2048;
+  if (sun.shadow.mapSize.x === size) return;
+  sun.shadow.mapSize.set(size, size);
+  // three.js makes the map again, at the new size, the next time it draws the shadow.
+  sun.shadow.map?.dispose();
+  sun.shadow.map = null;
 }
 
 /** The sky follows the office's weather and time of day, and its thunder is heard. */

@@ -11,7 +11,7 @@ import type { Ctx } from './context';
 import type { CoreState } from './ctx';
 import type { Parts } from './parts';
 import type { Frame } from './registry';
-import { FOV, SHADOW_EVERY } from './scene';
+import { FOV, fitPower } from './scene';
 import { FirstPersonBody } from '../world/character/person-first';
 
 /** Covering less ground than this (m/s) since your last footstep, your feet make no sound: a walk is 4.6. */
@@ -186,7 +186,7 @@ export function installLoop(ctx: Ctx, core: CoreState, parts: Pick<Parts, 'stage
     ctx.view.draw(f, drawScene);
   }
 
-  /** Frames drawn, to redraw the sun's shadow every SHADOW_EVERY of them. */
+  /** Frames drawn, to redraw the sun's shadow every other one in power saver. */
   let drawn = 0;
 
   /** The scene, then your hands on top of it. */
@@ -194,9 +194,20 @@ export function installLoop(ctx: Ctx, core: CoreState, parts: Pick<Parts, 'stage
     const { player, hands, sky, camera, renderer } = ctx;
     const { effect, scene } = parts.stage;
     const firstPerson = player.view === 'first';
+    // Power saver: the sun's shadow (hundreds of draw calls) every other frame, and no outlines, whose pass draws everything again.
+    const low = ctx.settings.lowPower;
+    fitPower(parts.stage, low);
+    renderer.shadowMap.needsUpdate = !low || drawn++ % 2 === 0;
+    const draw = (s: THREE.Scene, c: THREE.Camera) => {
+      if (!low) return effect.render(s, c);
+      // Without clearing first, as the effect draws (its own autoClear is unset): the hands mustn't wipe the scene under them.
+      const clear = renderer.autoClear;
+      renderer.autoClear = false;
+      renderer.render(s, c);
+      renderer.autoClear = clear;
+    };
     const unhide = firstBody?.hideExtras();
-    renderer.shadowMap.needsUpdate = drawn++ % SHADOW_EVERY === 0;
-    effect.render(scene, camera);
+    draw(scene, camera);
     unhide?.();
     // Not while something has the screen to itself (the telescope, the boss's monitor or the arcade up close), where they'd cover it.
     if (firstPerson && !ctx.view.covered() && !ctx.activities.any('hidesHands')) {
@@ -205,7 +216,7 @@ export function installLoop(ctx: Ctx, core: CoreState, parts: Pick<Parts, 'stage
       renderer.clearDepth();
       hands.setLight(sky.lightAt(camera.position));
       sky.shading(false);
-      effect.render(hands.scene, hands.camera);
+      draw(hands.scene, hands.camera);
       sky.shading(true);
     }
   }
@@ -217,7 +228,14 @@ export function installLoop(ctx: Ctx, core: CoreState, parts: Pick<Parts, 'stage
  */
 export function frameLoop(ctx: Ctx, loading: { drew(): void }): (ts?: number) => void {
   const timer = new THREE.Timer();
-  function frame(ts?: number) {
+  let last = -Infinity;
+  function frame(ts = performance.now()) {
+    // Power saver: 30 frames a second at most, a frame that comes sooner skipped (2 ms of slack for the screen's jitter).
+    if (ctx.settings.lowPower && ts - last < 1000 / 30 - 2) {
+      requestAnimationFrame(frame);
+      return;
+    }
+    last = ts;
     timer.update(ts);
     const delta = timer.getDelta();
     ctx.ticks.run({ delta, dt: Math.min(delta, 0.1), t: timer.getElapsed(), now: performance.now() });

@@ -71,8 +71,8 @@ export interface Parts {
   player: PlayerController;
   /** Your hands, in first person. */
   hands: Hands;
-  /** The system asks for less motion: no shaking the view, no swaying. */
-  reduceMotion: MediaQueryList;
+  /** The system asks for less motion, or power saver's on: no shaking the view, no swaying. */
+  reduceMotion: { readonly matches: boolean };
   /** Cigarette smoke, from anyone on a smoke break. */
   smoke: Smoke;
   /** A puff of it off someone's cigarette. */

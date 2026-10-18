@@ -88,8 +88,8 @@ export interface Ctx {
   readonly settings: Settings;
   readonly confetti: Confetti;
   readonly smoke: Smoke;
-  /** The system asks for less motion: no shaking the view, no swaying. */
-  readonly reduceMotion: MediaQueryList;
+  /** The system asks for less motion, or power saver's on: no shaking the view, no swaying. */
+  readonly reduceMotion: { readonly matches: boolean };
   readonly hud: Hud;
 
   /** The world the building's map is built as: the office, or a map of its own (the castle). */

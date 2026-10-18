@@ -118,7 +118,8 @@ parts.place.placeInCar();
 parts.player.view = parts.settings.view;
 parts.hands = new Hands(store.profile.color, parts.me.skinColor);
 parts.you = installYou(ctx);
-parts.reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+parts.reduceMotion = { get matches() { return reduceMotion.matches || parts.settings.lowPower; } };
 ({ smoke: parts.smoke, puff: parts.puff } = makeSmoke(ctx));
 parts.sound = makeSound(parts.settings);
 

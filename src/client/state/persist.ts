@@ -65,6 +65,8 @@ export interface Settings {
   hud: Record<HudPanel, boolean>;
   /** The ☰ menu's actions you pinned to the top bar, by id. */
   pins: string[];
+  /** Power saver: lighter frames for a slow computer or a laptop on battery (see drawScene and frameLoop in core/loop.ts). On by default in Firefox, whose WebGL costs the most main-thread time per frame. */
+  lowPower: boolean;
 }
 
 const SETTINGS_KEY = 'agent-office.settings';
@@ -127,7 +129,7 @@ export function rememberSpot(s: Spot) {
 }
 
 export function loadSettings(): Settings {
-  const s: Settings = { view: 'first', volume: 0.7, muted: false, music: 0.5, musicMuted: false, pageTurns: true, pushToTalk: false, notify: true, needsYouSound: 'once', hud: { ...HUD_DEFAULTS }, pins: [] };
+  const s: Settings = { view: 'first', volume: 0.7, muted: false, music: 0.5, musicMuted: false, pageTurns: true, pushToTalk: false, notify: true, needsYouSound: 'once', hud: { ...HUD_DEFAULTS }, pins: [], lowPower: typeof navigator !== 'undefined' && navigator.userAgent.includes('Firefox/') };
   try {
     const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? 'null');
     if (saved?.view === 'first' || saved?.view === 'third') s.view = saved.view;
@@ -140,6 +142,7 @@ export function loadSettings(): Settings {
     if (typeof saved?.notify === 'boolean') s.notify = saved.notify;
     if (NEEDS_YOU_SOUNDS.includes(saved?.needsYouSound)) s.needsYouSound = saved.needsYouSound;
     for (const k of Object.keys(s.hud) as HudPanel[]) if (typeof saved?.hud?.[k] === 'boolean') s.hud[k] = saved.hud[k];
+    if (typeof saved?.lowPower === 'boolean') s.lowPower = saved.lowPower;
     if (Array.isArray(saved?.pins)) s.pins = saved.pins.filter((p: unknown): p is string => typeof p === 'string').slice(0, 30);
   } catch {
     // storage blocked

@@ -119,6 +119,8 @@ export function openSettings(net: Net, settings: Settings, onChange: (s: Setting
   const talkRow = choiceRow('Voice chat', [[false, '🎙️ Open mic'], [true, '✋ Push to talk']], () => settings.pushToTalk, (pushToTalk) => change({ pushToTalk }));
   const musicRow = volumeRow('Jukebox volume', 'music', 'musicMuted');
 
+  // Power saver: lighter frames, for a slow computer or a laptop on battery.
+  const powerRow = choiceRow('Graphics', [[false, '✨ Full'], [true, '🔋 Power saver']], () => settings.lowPower, (lowPower) => change({ lowPower }));
   // The swish of the book's pages at the bookshelf, on or off.
   const pagesRow = choiceRow('Page turns at the bookshelf', [[true, '📖 On'], [false, 'Off']], () => settings.pageTurns, (pageTurns) => change({ pageTurns }));
   // The alarm when a worker stops to ask you something; picking one plays it.
@@ -446,6 +448,7 @@ export function openSettings(net: Net, settings: Settings, onChange: (s: Setting
     you: [
       setting('Your character', null, character),
       setting('Camera view', 'you', seg, note),
+      setting('Graphics', 'you', powerRow, h('p.setting-note', {}, 'Power saver draws 30 frames a second at one pixel per screen point, without outlines, with the sun’s shadow coarser and redrawn every other frame, and without the camera shaking or swaying: for a slow computer or a laptop on battery. It starts on in Firefox. Smoothed edges come back on, or go off, the next time the page loads.')),
       setting('Signed in', null, h('div.volume', {}, signOut), h('p.setting-note', {}, account ? `As ${account.name}, with your own account (${account.role}).` : 'With the shared office password.')),
     ],
     sound: [
