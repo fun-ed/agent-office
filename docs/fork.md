@@ -27,17 +27,19 @@ git clone https://github.com/fun-ed/agent-office.git agent-office
 cd agent-office
 git remote rename origin fork
 git remote add origin https://github.com/AgentSystemLabs/agent-office.git
-git fetch origin fork
+git fetch --multiple origin fork
 ```
 
-這樣 `origin` 仍然代表 upstream，和 `AGENTS.md` 及其他文件的用語一致。
+這樣 `origin` 仍然代表 upstream，和 `AGENTS.md` 及其他文件的用語一致。本機 `main` 追蹤的是 `fork/main`，`git pull` 和 `git push` 都以 fork 為準。
+
+同時抓兩個 remote 要加 `--multiple`。只寫 `git fetch origin fork` 時，git 會把 `fork` 當成 `origin` 上的 ref，回報 `fatal: couldn't find remote ref fork`。
 
 ## 自家的改動
 
 查看 fork 比 upstream 多了哪些 commit：
 
 ```sh
-git fetch origin fork
+git fetch --multiple origin fork
 git log --oneline --no-merges origin/main..fork/main
 ```
 
@@ -59,7 +61,7 @@ git log --oneline --no-merges origin/main..fork/main
 
 ```sh
 cd /Users/edward_oo/temp/agent-office
-git fetch origin fork
+git fetch --multiple origin fork
 git log --oneline fork/main..origin/main          # upstream 新增的 commit；沒有輸出就不必同步
 git worktree add ../agent-office-sync -b "sync/$(date +%Y%m%d)" fork/main
 cd ../agent-office-sync

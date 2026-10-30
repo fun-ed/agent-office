@@ -18,7 +18,7 @@ description: Sync and maintain the fun-ed/agent-office fork. Use to merge upstre
 ## 同步程序
 
 1. 在共用的主要 checkout 只做 fetch，不在那裡 merge、stash、reset 或 commit：
-   `git -C /Users/edward_oo/temp/agent-office fetch origin fork`
+   `git -C /Users/edward_oo/temp/agent-office fetch --multiple origin fork`（`git fetch origin fork` 會把 `fork` 當成 `origin` 上的 ref 而失敗）
 2. `git log --oneline fork/main..origin/main` 沒有輸出時，回報「已是最新」並停止。
 3. 開 worktree：`git worktree add ../agent-office-sync -b sync/<YYYYMMDD> fork/main`。
 4. 在 worktree 裡執行 `git merge --no-ff origin/main -m "Merge upstream main into fork"`。
